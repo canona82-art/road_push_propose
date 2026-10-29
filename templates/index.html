@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RoadPush AI 보행로 점검</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div><p class="eyebrow">ROAD SAFETY INTELLIGENCE</p><h1>RoadPush AI <span>보행로 점검 관제</span></h1></div>
+        <div id="system-status" class="status checking"><span class="status-dot"></span><span>MySQL 연결 확인 중</span></div>
+      </header>
+
+      <section class="upload-card">
+        <div class="upload-copy">
+          <p class="eyebrow">NEW INSPECTION</p><h2>주행 영상과 GPS 자막 불러오기</h2>
+          <p>영상 하나를 선택하면 같은 위치·같은 이름의 SRT를 자동으로 연결합니다.</p>
+        </div>
+        <div id="upload-form">
+          <button id="native-video-button" class="file-field video-picker" type="button"><span>영상 선택</span><strong id="selected-video-name">영상 파일을 선택하세요</strong><small id="matched-srt-name">같은 위치·같은 이름의 SRT가 자동 연결됩니다</small></button>
+        </div>
+        <div id="progress-wrap" class="progress-wrap" hidden>
+          <div class="progress-copy"><span id="progress-label">업로드 준비</span><strong id="progress-value">0%</strong></div>
+          <div class="progress-track"><i id="progress-bar"></i></div>
+        </div>
+      </section>
+
+      <section class="summary" aria-label="선택한 영상 요약">
+        <article><span>종합 안전 점수</span><strong id="safety-score">—</strong><small id="safety-grade">영상 선택 전</small></article>
+        <article><span>총 점검 거리</span><strong id="distance-total">0m</strong><small id="duration-total">0초</small></article>
+        <article><span>100m 구간</span><strong id="segment-count">0</strong><small>GPS 누적거리 기준</small></article>
+        <article><span>조심 · 위험 구간</span><strong id="risk-segment-count">0</strong><small>구간 최대 위험도 기준</small></article>
+      </section>
+
+      <section class="dashboard-grid">
+        <aside class="history-card card">
+          <div class="section-heading"><div><p class="eyebrow">INSPECTION HISTORY</p><h2>누적 점검 영상</h2></div><button id="refresh-button" class="icon-button" type="button" title="새로고침">↻</button></div>
+          <div class="all-videos-wrap"><button id="all-videos-button" class="all-videos-button" type="button"><span>전체</span><small id="all-videos-count">모든 최신 GPS 포인트</small></button></div>
+          <div id="video-list" class="video-list"><p class="empty-message">저장된 영상을 불러오는 중입니다.</p></div>
+        </aside>
+
+        <section class="map-card card">
+          <div class="section-heading map-heading"><div><p class="eyebrow">100M SEGMENT MAP</p><h2 id="map-title">경로를 선택하세요</h2></div><button id="fit-button" class="secondary-button" type="button">전체 경로 보기</button></div>
+          <div id="map" aria-label="GPS 위험도 지도"></div>
+          <div class="legend" aria-label="위험도 범례"><span><i class="safe"></i>안전 0–25</span><span><i class="caution"></i>조심 26–50</span><span><i class="danger"></i>위험 51–100</span></div>
+        </section>
+
+        <aside class="detail-panel card" aria-live="polite">
+          <div class="section-heading"><div><p class="eyebrow">SELECTED FRAME</p><h2 id="detail-title">지도에서 위치를 선택하세요</h2></div><span id="risk-badge" class="risk-badge neutral">대기</span></div>
+          <div class="detail-content">
+            <div class="media-column">
+              <div class="media-tabs" role="tablist"><button id="frame-tab" class="active" type="button">AI 분석 프레임</button><button id="video-tab" type="button">원본 영상</button></div>
+              <div id="frame-view" class="media-view"><div class="frame-wrap"><img id="frame-image" alt="선택한 AI 분석 프레임" hidden /><div id="frame-placeholder"><span class="focus-symbol">⌖</span><strong>분석 지점 대기 중</strong><small>지도 위 점이나 선을 클릭하면 대응 프레임을 표시합니다.</small></div></div></div>
+              <div id="video-view" class="media-view" hidden><video id="source-player" controls playsinline></video></div>
+            </div>
+            <div class="info-column">
+              <dl class="metadata">
+                <div><dt>100m 구간</dt><dd id="detail-segment">—</dd></div><div><dt>영상 시각</dt><dd id="detail-seconds">—</dd></div>
+                <div><dt>위험도</dt><dd id="detail-risk">—</dd></div><div><dt>유효 보행폭</dt><dd id="detail-width">—</dd></div>
+                <div><dt>GPS</dt><dd id="detail-gps">—</dd></div><div><dt>촬영 시각</dt><dd id="detail-time">—</dd></div>
+              </dl>
+              <button id="report-button" class="report-button" type="button" disabled>점검 리포트 생성 · 저장</button>
+              <a id="report-download" class="download-link" hidden>저장된 리포트 다운로드</a>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
