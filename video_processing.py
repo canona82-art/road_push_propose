@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import subprocess
@@ -72,6 +73,7 @@ class VideoProcessor:
             capture = cv2.VideoCapture(video["video_path"])
             if not capture.isOpened():
                 raise RuntimeError("영상 파일을 열 수 없습니다.")
+            rotation = self._configure_capture_orientation(capture, cv2, video["video_path"])
             fps = float(capture.get(cv2.CAP_PROP_FPS))
             if fps <= 0 or math.isnan(fps):
                 fps = 30.0
@@ -114,6 +116,7 @@ class VideoProcessor:
                             distance_meters=cumulative_distance,
                         )
                     continue
+                frame = self._rotate_frame(frame, rotation, cv2)
 
                 seconds = source_frame_index / fps
                 gps = gps_at_time(gps_entries, seconds)
@@ -228,6 +231,78 @@ class VideoProcessor:
                 status="failed",
                 error_message=str(exc)[:2000],
             )
+
+    @staticmethod
+    def _configure_capture_orientation(
+        capture: Any,
+        cv2: Any,
+        video_path: str | Path | None = None,
+    ) -> int:
+        """Read display rotation and make frame orientation deterministic.
+
+        Browsers honor a video's rotation metadata automatically. OpenCV backends
+        differ: some auto-rotate and some return the encoded (sideways) pixels.
+        Disable backend auto-rotation and apply the metadata ourselves so that AI
+        frames, segment videos, and report images all match the source player.
+        """
+        orientation_meta = getattr(cv2, "CAP_PROP_ORIENTATION_META", None)
+        orientation_auto = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", None)
+        rotation = 0
+        if orientation_meta is not None:
+            try:
+                raw_rotation = float(capture.get(orientation_meta))
+                rotation = int(round(raw_rotation / 90.0) * 90) % 360
+            except (TypeError, ValueError, OverflowError):
+                rotation = 0
+        if rotation == 0 and video_path is not None:
+            rotation = VideoProcessor._probe_video_rotation(video_path)
+        if orientation_auto is not None:
+            try:
+                capture.set(orientation_auto, 0)
+            except (TypeError, ValueError):
+                pass
+        return rotation if rotation in {90, 180, 270} else 0
+
+    @staticmethod
+    def _probe_video_rotation(video_path: str | Path) -> int:
+        """Fall back to FFprobe when the OpenCV backend omits orientation metadata."""
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "error", "-select_streams", "v:0",
+                    "-show_entries", "stream_tags=rotate:stream_side_data=rotation",
+                    "-of", "json", str(video_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if result.returncode != 0:
+                return 0
+            stream = json.loads(result.stdout).get("streams", [{}])[0]
+            for side_data in stream.get("side_data_list", []):
+                if "rotation" in side_data:
+                    # FFprobe reports mathematical counter-clockwise rotation,
+                    # while OpenCV's orientation property uses the inverse angle.
+                    value = -float(side_data["rotation"])
+                    return int(round(value / 90.0) * 90) % 360
+            tag = stream.get("tags", {}).get("rotate")
+            if tag is not None:
+                return int(round(float(tag) / 90.0) * 90) % 360
+        except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, IndexError, KeyError):
+            return 0
+        return 0
+
+    @staticmethod
+    def _rotate_frame(frame: Any, rotation: int, cv2: Any) -> Any:
+        rotate_codes = {
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }
+        rotate_code = rotate_codes.get(rotation)
+        return cv2.rotate(frame, rotate_code) if rotate_code is not None else frame
 
     @staticmethod
     def _encode_segment(frames_directory: Path, output_path: Path, fps: float) -> None:
