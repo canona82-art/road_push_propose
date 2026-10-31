@@ -1,2 +1,8 @@
 delete_road_data.py
 __pycache__
+roadpush_app/road_data/uploads/*
+roadpush_app/road_data/videos/*
+roadpush_app/road_data/reports/*
+!roadpush_app/road_data/**/.gitkeep
+yolov8m.pt
+yolov8m-seg.pt
